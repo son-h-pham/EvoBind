@@ -97,6 +97,9 @@ flags.DEFINE_string('peptide_sequence', None,
 flags.DEFINE_integer('cyclic_offset', None,
     'Use a cyclic offset for the peptide (1).')
 
+flags.DEFINE_string('locked_positions', None,
+    'Comma separated list of locked positions and their amino acids in the format "position:amino_acid" (e.g., "0:M,5:K").')
+
 ##### databases flags #####
 flags.DEFINE_string('data_dir', None,
     'Path to directory of supporting data.')
@@ -317,7 +320,8 @@ def optimise_binder(
     model_runners: Optional[Dict[str, model.RunModel]],
     num_iterations: int,
     predict_only: bool,
-    predict_only_sequence: str):
+    predict_only_sequence: str,
+    locked_positions: str):
 
   """
   1. Initialize an array with rabdomly distributed sequence probabilities: initialize_sequence
@@ -348,10 +352,24 @@ def optimise_binder(
     print('No target residues provided. Designing towards entire receptor sequence...')
     receptor_if_residues = np.arange(feature_dict['aatype'].shape[0])
 
+  # Process locked_positions
+  locked_pos_dict = {}
+  if locked_positions:
+      for item in locked_positions.split(','):
+          pos, aa = item.split(':')
+          locked_pos_dict[int(pos)] = aa
+          
   #Initialize weights - these are the amino acid probabilities
   #Also returns the peptide_sequence corresponding to the weights
   seq_weights, peptide_sequence = initialize_weights(peptide_length)
 
+
+  if locked_pos_dict:
+      peptide_sequence = list(peptide_sequence)
+      for pos, aa in locked_pos_dict.items():
+          peptide_sequence[pos] = aa
+      peptide_sequence = ''.join(peptide_sequence)
+      
   #Add cyclic
   if FLAGS.cyclic_offset:
       cyclic_offset_array = np.zeros((peptide_length, peptide_length))
@@ -402,7 +420,7 @@ def optimise_binder(
   #Iterate
   for num_iter in range(len(sequence_scores['if_dist_peptide']), num_iterations):
     #Mutate sequence
-    new_sequence = mutate_sequence(peptide_sequence, sequence_scores)
+    new_sequence = mutate_sequence(peptide_sequence, sequence_scores, locked_positions=locked_pos_dict)
     #Predict and get loss
     if_dist_peptide, plddt, unrelaxed_protein = predict_function(new_sequence, feature_dict, output_dir, model_runners,
                                                                     random_seed, receptor_if_residues, predict_only)
@@ -471,12 +489,12 @@ def main(argv):
         peptide_length=FLAGS.peptide_length,
         output_dir=FLAGS.output_dir,
         data_pipeline=data_pipeline,
-        model_runners=model_runners,
         random_seed=random_seed,
+        model_runners=model_runners,
         num_iterations=FLAGS.num_iterations,
         predict_only=FLAGS.predict_only,
-        predict_only_sequence=FLAGS.peptide_sequence)
-
+        predict_only_sequence=FLAGS.peptide_sequence,
+        locked_positions=FLAGS.locked_positions)
 
 if __name__ == '__main__':
   flags.mark_flags_as_required([
